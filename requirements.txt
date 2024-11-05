@@ -10,3 +10,4 @@ msrest
 pydub
 google-cloud-texttospeech
 azure-storage-blob
+gunicorn
