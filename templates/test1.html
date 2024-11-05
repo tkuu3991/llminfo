@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f9;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            max-width: 1200px;
+        }
+        #canvas {
+            width: 300px;
+            height: 500px;
+            background-color: transparent;
+        }
+        #chat-container {
+            width: 90%;
+            max-width: 600px;
+            background-color: white;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            margin-left: 20px;
+        }
+        #chat-box {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            height: 400px;
+        }
+        .message {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        .user {
+            justify-content: flex-end;
+            color: #007bff;
+        }
+        .bot {
+            justify-content: flex-start;
+            color: #333;
+        }
+        .bot img {
+            width: 40px;
+            height: 40px;
+            margin-right: 10px;
+            border-radius: 50%;
+        }
+        #input-container {
+            display: flex;
+            border-top: 1px solid #ddd;
+        }
+        #input {
+            flex-grow: 1;
+            border: none;
+            padding: 10px;
+            font-size: 16px;
+            outline: none;
+        }
+        #send-btn,
+        #speak-btn,
+        #upload-btn {
+            padding: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #speak-btn {
+            background-color: #28a745;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <canvas id="canvas"></canvas>
+        <div id="chat-container">
+            <div id="chat-box"></div>
+            <div id="input-container">
+                <input type="text" id="input" placeholder="輸入訊息...">
+                <button id="send-btn">發送</button>
+                <button id="speak-btn">語音識別</button>
+                <input type="file" id="file-input" accept="image/*" style="display: none;">
+                <button id="upload-btn">上傳圖片</button>
+                <audio id="audio-player" style="display: none;"></audio>
+            </div>
+        </div>
+    </div>
+    <script src="https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/dylanNew/live2d/webgl/Live2D/lib/live2d.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pixi.js@7.x/dist/pixi.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/RaSan147/pixi-live2d-display@v0.5.0-ls-7/dist/index.min.js"></script>
+    <script>
+        const app = new PIXI.Application({
+            view: document.getElementById('canvas'),
+            width: 300,
+            height: 500,
+            transparent: true
+        });
+
+        let model;
+
+        PIXI.live2d.Live2DModel.from('https://raw.githubusercontent.com/imuncle/live2d/refs/heads/master/model/shizuku/shizuku.model.json').then(loadedModel => {
+            model = loadedModel;
+            app.stage.addChild(model);
+
+            model.x = app.renderer.width / 2;
+            model.y = app.renderer.height * 0.65;
+            model.anchor.set(0.5, 0.5);
+            model.scale.set(0.4, 0.4);
+            model.interactive = true;
+
+            model.on('pointertap', () => {
+                console.log('Model was tapped!');
+                const audio_link = "output/output.mp3"; 
+                const volume = 1; 
+                const expression = 3; 
+                const resetExpression = true; 
+                const crossOrigin = "anonymous"; 
+
+                model.speak(audio_link, {
+                    volume: volume,
+                    expression: expression,
+                    resetExpression: resetExpression,
+                    crossOrigin: crossOrigin
+                });
+            });
+
+            app.start();
+        });
+
+        const chatBox = document.getElementById('chat-box');
+        const input = document.getElementById('input');
+        const sendBtn = document.getElementById('send-btn');
+        const speakBtn = document.getElementById('speak-btn');
+        const fileInput = document.getElementById('file-input');
+        const uploadBtn = document.getElementById('upload-btn');
+        const audioPlayer = document.getElementById('audio-player');
+
+        sendBtn.addEventListener('click', sendMessage);
+        input.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        speakBtn.addEventListener('click', () => {
+            fetch('http://127.0.0.1:5000/recognize', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.recognition) {
+                    appendMessage('user', data.recognition);
+                    appendMessage('bot', data.response, true);
+                    playAudio(data.response);
+                } else {
+                    appendMessage('bot', data.error);
+                }
+            })
+            .catch(error => console.error('Error:', error));
+        });
+
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', uploadImage);
+
+        function sendMessage() {
+    const message = input.value.trim();
+    if (message) {
+        appendMessage('user', message);
+        input.value = '';
+
+        fetch('http://127.0.0.1:5000/message', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ message: message })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.response) {
+                appendMessage('bot', data.response, true);
+                playAudio(data.response);
+
+                if (model) {
+                    // Use the correct audio file URL
+                    const audio_link = "http://127.0.0.1:5000/output/output.mp3"; // Update with actual file path
+                    const volume = 1; 
+                    const expression = 3; 
+                    const resetExpression = true; 
+                    const crossOrigin = "anonymous"; 
+
+                    model.speak(audio_link, {
+                        volume: volume,
+                        expression: expression,
+                        resetExpression: resetExpression,
+                        crossOrigin: crossOrigin
+                    }).catch(error => {
+                        console.error('Error speaking:', error);
+                    });
+                }
+            } else {
+                appendMessage('bot', '無法處理您的請求，請稍後再試。');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            appendMessage('bot', '發生錯誤，請稍後再試。');
+        });
+    }
+}
+
+        function uploadImage() {
+            const file = fileInput.files[0];
+            if (file) {
+                const formData = new FormData();
+                formData.append('image', file);
+
+                fetch('http://127.0.0.1:5000/upload_image', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.description) {
+                        appendMessage('bot', `Description: ${data.description}`, true);
+                        playAudio(data.description);
+                    } else {
+                        appendMessage('bot', '無法處理您的請求，請稍後再試。');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    appendMessage('bot', '發生錯誤，請稍後再試。');
+                });
+            } else {
+                appendMessage('bot', '請選擇一張圖片。');
+            }
+        }
+
+        function appendMessage(sender, message, isBot = false) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}`;
+            if (isBot) {
+                const img = document.createElement('img');
+                img.src = 'ai.gif'; // Replace with your desired AI GIF URL
+                messageDiv.appendChild(img);
+            }
+            const text = document.createElement('span');
+            text.textContent = message;
+            messageDiv.appendChild(text);
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function playAudio(message) {
+            fetch('http://127.0.0.1:5000/synthesize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ text: message })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.audio_url) {
+                    const audioUrl = `http://127.0.0.1:5000/audio?${new Date().getTime()}`;
+                    audioPlayer.src = audioUrl;
+                    audioPlayer.style.display = 'block';
+                    audioPlayer.play();
+                } else {
+                    console.error('Error:', data.error);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        }
+    </script>
+</body>
+</html>
